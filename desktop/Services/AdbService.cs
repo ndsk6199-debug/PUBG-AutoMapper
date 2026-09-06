@@ -50,6 +50,12 @@ public sealed class AdbService
         return ms.ToArray();
     }
 
+    public async Task RunPublicAsync(string args, CancellationToken ct = default)
+    {
+        var r = await RunAsync(args, ct);
+        if (r.ExitCode != 0) throw new InvalidOperationException(r.StdErr.Trim());
+    }
+
     private async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(string args, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(FindAdb(), args)
