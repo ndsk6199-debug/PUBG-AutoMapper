@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Interop;
 using PubgAutoMapper.Services;
 
 namespace PubgAutoMapper;
@@ -13,14 +14,26 @@ public partial class MainWindow
         BridgeButton.IsEnabled = false;
         try
         {
+            _input?.Dispose();
             _bridge?.Dispose();
             _bridge = new ControlBridge(_adb);
             await _bridge.ConnectAsync(_serial);
+            _input = new RealtimeInputController(_bridge)
+            {
+                ScreenWidth = _width,
+                ScreenHeight = _height
+            };
+            _input.Attach(new WindowInteropHelper(this).Handle);
             StatusText.Text = "Status: Android Agent connected";
             TestTapButton.IsEnabled = true;
+            InputToggleButton.IsEnabled = true;
         }
         catch (Exception ex)
         {
+            _input?.Dispose();
+            _input = null;
+            _bridge?.Dispose();
+            _bridge = null;
             StatusText.Text = "Status: Agent bridge error";
             ResultsText.Text = ex.Message;
             BridgeButton.IsEnabled = true;
