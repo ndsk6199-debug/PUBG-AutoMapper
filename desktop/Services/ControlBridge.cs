@@ -3,9 +3,10 @@ using System.Text;
 
 namespace PubgAutoMapper.Services;
 
-public sealed class ControlBridge
+public sealed class ControlBridge : IDisposable
 {
     private readonly AdbService _adb;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private TcpClient? _client;
     private StreamReader? _reader;
     private StreamWriter? _writer;
@@ -31,9 +32,18 @@ public sealed class ControlBridge
     private async Task<string> SendAsync(string command, CancellationToken ct)
     {
         if (_writer is null || _reader is null) throw new InvalidOperationException("Control bridge is not connected.");
-        await _writer.WriteLineAsync(command.AsMemory(), ct);
-        return (await _reader.ReadLineAsync(ct))?.Trim() ?? "ERR";
+        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _writer.WriteLineAsync(command.AsMemory(), ct).ConfigureAwait(false);
+            return (await _reader.ReadLineAsync(ct).ConfigureAwait(false))?.Trim() ?? "ERR";
+        }
+        finally { _sendLock.Release(); }
     }
 
-    public void Dispose() { try { _client?.Dispose(); } catch { } }
+    public void Dispose()
+    {
+        try { _client?.Dispose(); } catch { }
+        _sendLock.Dispose();
+    }
 }
