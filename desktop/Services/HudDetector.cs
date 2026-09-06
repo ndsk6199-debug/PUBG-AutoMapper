@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -54,7 +55,6 @@ public sealed class HudDetector
 
         if (candidates.Count < 6) return;
 
-        // Weighted centroid is more stable than a raw pixel centroid for translucent HUD icons.
         double sx = 0, sy = 0, weight = 0;
         foreach (var c in candidates)
         {
