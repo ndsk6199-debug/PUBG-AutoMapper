@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "game": "PUBG Mobile",
+  "device": {
+    "model": "Samsung Galaxy S10 Lite",
+    "orientation": "landscape"
+  },
+  "coordinateSystem": {
+    "type": "normalized",
+    "origin": "top-left",
+    "xRange": [0.0, 1.0],
+    "yRange": [0.0, 1.0]
+  },
+  "input": {
+    "movement": {
+      "type": "joystick",
+      "center": { "x": 0.193265, "y": 0.674267 },
+      "radius": null,
+      "keys": { "W": "up", "A": "left", "S": "down", "D": "right" }
+    },
+    "mouseLook": {
+      "enabled": true,
+      "center": { "x": 0.63, "y": 0.47 },
+      "sensitivity": 0.5,
+      "releaseKey": "Escape"
+    }
+  },
+  "buttons": {
+    "Fire": { "x": 0.847731, "y": 0.762215 },
+    "Aim Down Sights": { "x": 0.923865, "y": 0.521173 },
+    "Jump": { "x": 0.925329, "y": 0.664495 },
+    "Crouch": { "x": 0.838946, "y": 0.928339 },
+    "Prone": { "x": 0.901903, "y": 0.908795 },
+    "Reload": { "x": 0.768668, "y": 0.934853 },
+    "Map": { "x": 0.920937, "y": 0.117264 },
+    "Weapon 1": { "x": 0.443631, "y": 0.915309 },
+    "Weapon 2": { "x": 0.547584, "y": 0.912052 },
+    "First-Person View": { "x": 0.238653, "y": 0.843648 },
+    "Inventory": { "x": 0.0893119, "y": 0.899023 },
+    "Sprint": { "x": 0.689605, "y": 0.781759 }
+  },
+  "calibration": {
+    "status": "measured-reference",
+    "autoDetection": true,
+    "confidenceRequired": 0.85
+  }
+}
