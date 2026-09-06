@@ -1,5 +1,5 @@
-using System.Drawing;
-using System.Drawing.Imaging;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace PubgAutoMapper.Services;
 
@@ -10,18 +10,22 @@ public sealed class HudDetector
     public IReadOnlyList<HudPoint> Detect(byte[] png, int width, int height)
     {
         using var input = new MemoryStream(png);
-        using var bitmap = new Bitmap(input);
-        var points = new List<HudPoint>();
+        var decoder = new PngBitmapDecoder(input, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        var source = decoder.Frames[0];
+        var bitmap = new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        int stride = bitmap.PixelWidth * 4;
+        var pixels = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, stride, 0);
 
-        // Deterministic first pass: detect bright circular/touch controls in known PUBG HUD regions.
-        AddIfFound(points, "Joystick", FindBrightCluster(bitmap, 0.00, 0.45, 0.42, 0.95, 18, 180));
-        AddIfFound(points, "Fire", FindBrightCluster(bitmap, 0.72, 0.55, 1.00, 0.98, 18, 180));
-        AddIfFound(points, "Scope", FindBrightCluster(bitmap, 0.80, 0.30, 1.00, 0.75, 14, 180));
-        AddIfFound(points, "Jump", FindBrightCluster(bitmap, 0.82, 0.55, 1.00, 0.80, 12, 180));
-        AddIfFound(points, "Crouch", FindBrightCluster(bitmap, 0.70, 0.78, 0.96, 1.00, 12, 180));
-        AddIfFound(points, "Prone", FindBrightCluster(bitmap, 0.82, 0.78, 1.00, 1.00, 12, 180));
-        AddIfFound(points, "Reload", FindBrightCluster(bitmap, 0.62, 0.82, 0.86, 1.00, 12, 180));
-        AddIfFound(points, "Map", FindBrightCluster(bitmap, 0.82, 0.00, 1.00, 0.20, 10, 180));
+        var points = new List<HudPoint>();
+        AddIfFound(points, "Joystick", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.00, 0.45, 0.42, 0.95, 18, 180));
+        AddIfFound(points, "Fire", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.72, 0.55, 1.00, 0.98, 18, 180));
+        AddIfFound(points, "Scope", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.80, 0.30, 1.00, 0.75, 14, 180));
+        AddIfFound(points, "Jump", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.82, 0.55, 1.00, 0.80, 12, 180));
+        AddIfFound(points, "Crouch", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.70, 0.78, 0.96, 1.00, 12, 180));
+        AddIfFound(points, "Prone", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.82, 0.78, 1.00, 1.00, 12, 180));
+        AddIfFound(points, "Reload", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.62, 0.82, 0.86, 1.00, 12, 180));
+        AddIfFound(points, "Map", FindBrightCluster(pixels, bitmap.PixelWidth, bitmap.PixelHeight, 0.82, 0.00, 1.00, 0.20, 10, 180));
         return points;
     }
 
@@ -31,30 +35,26 @@ public sealed class HudDetector
         list.Add(new HudPoint(name, c.X, c.Y, c.Confidence, "bright-cluster"));
     }
 
-    private static Candidate? FindBrightCluster(Bitmap b, double x0, double y0, double x1, double y1, int minPixels, int brightness)
+    private static Candidate? FindBrightCluster(byte[] pixels, int width, int height, double x0, double y0, double x1, double y1, int minPixels, int brightness)
     {
-        int left = Math.Clamp((int)(b.Width * x0), 0, b.Width - 1);
-        int top = Math.Clamp((int)(b.Height * y0), 0, b.Height - 1);
-        int right = Math.Clamp((int)(b.Width * x1), left + 1, b.Width);
-        int bottom = Math.Clamp((int)(b.Height * y1), top + 1, b.Height);
+        int left = Math.Clamp((int)(width * x0), 0, width - 1);
+        int top = Math.Clamp((int)(height * y0), 0, height - 1);
+        int right = Math.Clamp((int)(width * x1), left + 1, width);
+        int bottom = Math.Clamp((int)(height * y1), top + 1, height);
         long sx = 0, sy = 0, count = 0;
-        int step = Math.Max(1, Math.Min(b.Width, b.Height) / 180);
+        int step = Math.Max(1, Math.Min(width, height) / 180);
+
         for (int y = top; y < bottom; y += step)
         for (int x = left; x < right; x += step)
         {
-            var p = b.GetPixel(x, y);
-            int v = (p.R + p.G + p.B) / 3;
-            int spread = Math.Max(p.R, Math.Max(p.G, p.B)) - Math.Min(p.R, Math.Min(p.G, p.B));
-            if (v >= brightness && spread < 90)
-            {
-                sx += x; sy += y; count++;
-            }
+            int i = y * width * 4 + x * 4;
+            int b = pixels[i], g = pixels[i + 1], r = pixels[i + 2];
+            int v = (r + g + b) / 3;
+            int spread = Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b));
+            if (v >= brightness && spread < 90) { sx += x; sy += y; count++; }
         }
         if (count < minPixels) return null;
-        double nx = (double)sx / count / b.Width;
-        double ny = (double)sy / count / b.Height;
-        double confidence = Math.Clamp(count / 800.0, 0.35, 0.95);
-        return new Candidate(nx, ny, confidence);
+        return new Candidate((double)sx / count / width, (double)sy / count / height, Math.Clamp(count / 800.0, 0.35, 0.95));
     }
 
     private sealed record Candidate(double X, double Y, double Confidence);
