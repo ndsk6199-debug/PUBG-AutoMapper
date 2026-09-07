@@ -8,6 +8,7 @@ namespace PubgAutoMapper.Services;
 public sealed class RealtimeInputController : IDisposable
 {
     private readonly ControlBridge _bridge;
+    private readonly MappingProfile _profile;
     private readonly ConcurrentQueue<InputEvent> _queue = new();
     private readonly HashSet<string> _held = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
@@ -22,18 +23,22 @@ public sealed class RealtimeInputController : IDisposable
     private bool _haveMouse;
     private bool _active;
 
-    public double JoystickX { get; set; } = 0.193265;
-    public double JoystickY { get; set; } = 0.674267;
-    public double LookX { get; set; } = 0.63;
-    public double LookY { get; set; } = 0.47;
-    public double JoystickRadius { get; set; } = 0.10;
-    public double MouseScale { get; set; } = 2.2;
+    public double JoystickX => _profile.Joystick.X;
+    public double JoystickY => _profile.Joystick.Y;
+    public double LookX => _profile.LookCenter.X;
+    public double LookY => _profile.LookCenter.Y;
+    public double JoystickRadius => _profile.JoystickRadius;
+    public double MouseScale => _profile.MouseScale;
     public int ScreenWidth { get; set; } = 2400;
     public int ScreenHeight { get; set; } = 1080;
-
     public bool IsActive => _active;
 
-    public RealtimeInputController(ControlBridge bridge) => _bridge = bridge;
+    public RealtimeInputController(ControlBridge bridge, MappingProfile? profile = null)
+    {
+        _bridge = bridge;
+        _profile = profile ?? new MappingProfile();
+        MappingProfile.Validate(_profile);
+    }
 
     public void Attach(IntPtr hwnd)
     {
@@ -47,13 +52,7 @@ public sealed class RealtimeInputController : IDisposable
             throw new InvalidOperationException("Windows input hooks could not be installed.");
     }
 
-    public void Start()
-    {
-        if (_active) return;
-        _active = true;
-        _cts = new CancellationTokenSource();
-        _worker = Task.Run(() => WorkerAsync(_cts.Token));
-    }
+    public void Start() { if (_active) return; _active = true; _cts = new(); _worker = Task.Run(() => WorkerAsync(_cts.Token)); }
 
     public void Stop()
     {
@@ -68,17 +67,12 @@ public sealed class RealtimeInputController : IDisposable
 
     private async Task WorkerAsync(CancellationToken ct)
     {
-        var sw = Stopwatch.StartNew();
         while (!ct.IsCancellationRequested)
         {
-            while (_queue.TryDequeue(out var ev))
-                await ProcessAsync(ev, ct).ConfigureAwait(false);
-
+            while (_queue.TryDequeue(out var ev)) await ProcessAsync(ev, ct).ConfigureAwait(false);
             string[] held;
             lock (_gate) held = _held.ToArray();
-            foreach (var key in held)
-                await SendMovementAsync(key, ct).ConfigureAwait(false);
-
+            foreach (var key in held) await SendMovementAsync(key, ct).ConfigureAwait(false);
             await Task.Delay(18, ct).ConfigureAwait(false);
         }
     }
@@ -93,28 +87,29 @@ public sealed class RealtimeInputController : IDisposable
                     lock (_gate) _held.Add(ev.Key);
                     await SendMovementAsync(ev.Key, ct).ConfigureAwait(false);
                 }
-                else if (ev.Key == "Space") await TapAsync(0.925329, 0.664495, ct);
-                else if (ev.Key == "C") await TapAsync(0.838946, 0.928339, ct);
-                else if (ev.Key == "Z") await TapAsync(0.901903, 0.908795, ct);
-                else if (ev.Key == "R") await TapAsync(0.768668, 0.934853, ct);
-                else if (ev.Key == "Tab") await TapAsync(0.0893119, 0.899023, ct);
-                else if (ev.Key == "M") await TapAsync(0.920937, 0.117264, ct);
-                else if (ev.Key == "1") await TapAsync(0.443631, 0.915309, ct);
-                else if (ev.Key == "2") await TapAsync(0.547584, 0.912052, ct);
-                else if (ev.Key == "Shift") await TapAsync(0.689605, 0.781759, ct);
+                else if (ev.Key == "Space") await TapAsync(_profile.Jump, ct);
+                else if (ev.Key == "C") await TapAsync(_profile.Crouch, ct);
+                else if (ev.Key == "Z") await TapAsync(_profile.Prone, ct);
+                else if (ev.Key == "R") await TapAsync(_profile.Reload, ct);
+                else if (ev.Key == "Tab") await TapAsync(_profile.Inventory, ct);
+                else if (ev.Key == "M") await TapAsync(_profile.Map, ct);
+                else if (ev.Key == "1") await TapAsync(_profile.Weapon1, ct);
+                else if (ev.Key == "2") await TapAsync(_profile.Weapon2, ct);
+                else if (ev.Key == "Shift") await TapAsync(_profile.Sprint, ct);
                 break;
             case InputKind.KeyUp:
                 if (ev.Key is "W" or "A" or "S" or "D") lock (_gate) _held.Remove(ev.Key);
                 break;
             case InputKind.MouseLeft:
-                if (ev.Down) await TapAsync(0.847731, 0.762215, ct);
+                if (ev.Down) await TapAsync(_profile.Fire, ct);
                 break;
             case InputKind.MouseRight:
-                if (ev.Down) await TapAsync(0.923865, 0.521173, ct);
+                if (ev.Down) await TapAsync(_profile.Aim, ct);
                 break;
             case InputKind.MouseMove:
                 if (Math.Abs(ev.Dx) + Math.Abs(ev.Dy) > 0)
                 {
+                    // Prototype relative-look bridge. The Android side currently exposes a swipe primitive.
                     var x2 = Math.Clamp(LookX + ev.Dx * MouseScale / ScreenWidth, 0.05, 0.95);
                     var y2 = Math.Clamp(LookY + ev.Dy * MouseScale / ScreenHeight, 0.05, 0.95);
                     await _bridge.SwipeAsync(LookX * ScreenWidth, LookY * ScreenHeight, x2 * ScreenWidth, y2 * ScreenHeight, 18, ct).ConfigureAwait(false);
@@ -132,8 +127,7 @@ public sealed class RealtimeInputController : IDisposable
         return _bridge.SwipeAsync(JoystickX * ScreenWidth, JoystickY * ScreenHeight, x2 * ScreenWidth, y2 * ScreenHeight, 35, ct);
     }
 
-    private Task TapAsync(double nx, double ny, CancellationToken ct)
-        => _bridge.TapAsync(nx * ScreenWidth, ny * ScreenHeight, ct);
+    private Task TapAsync(TouchPoint p, CancellationToken ct) => _bridge.TapAsync(p.X * ScreenWidth, p.Y * ScreenHeight, ct);
 
     private IntPtr KeyboardHook(int code, IntPtr wParam, IntPtr lParam)
     {
@@ -163,8 +157,7 @@ public sealed class RealtimeInputController : IDisposable
             var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
             if (wParam == (IntPtr)WM_MOUSEMOVE)
             {
-                if (_haveMouse)
-                    _queue.Enqueue(new InputEvent(InputKind.MouseMove, "", false, data.pt.X - _lastMouse.X, data.pt.Y - _lastMouse.Y));
+                if (_haveMouse) _queue.Enqueue(new InputEvent(InputKind.MouseMove, "", false, data.pt.X - _lastMouse.X, data.pt.Y - _lastMouse.Y));
                 _lastMouse = data.pt; _haveMouse = true;
             }
             else if (wParam == (IntPtr)WM_LBUTTONDOWN || wParam == (IntPtr)WM_RBUTTONDOWN)
