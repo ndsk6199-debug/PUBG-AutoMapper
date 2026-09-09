@@ -6,6 +6,7 @@ namespace PubgAutoMapper.Services;
 
 public sealed class ControlBridge : IDisposable
 {
+    private const int AgentPort = 27184;
     private readonly AdbService _adb;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private TcpClient? _client;
@@ -16,14 +17,16 @@ public sealed class ControlBridge : IDisposable
 
     public async Task ConnectAsync(string serial, CancellationToken ct = default)
     {
-        await _adb.RunPublicAsync($"-s \"{serial}\" reverse tcp:27183 localabstract:pubg_automapper", ct);
+        // Desktop is the TCP client, agent is the TCP server on Android.
+        await _adb.RunPublicAsync($"-s \"{serial}\" forward --remove tcp:{AgentPort}", ct);
+        await _adb.RunPublicAsync($"-s \"{serial}\" forward tcp:{AgentPort} tcp:{AgentPort}", ct);
         _client = new TcpClient();
-        await _client.ConnectAsync("127.0.0.1", 27183, ct);
+        await _client.ConnectAsync("127.0.0.1", AgentPort, ct);
         var stream = _client.GetStream();
         _reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
         _writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true, NewLine = "\n" };
         var response = await SendAsync("PING", ct);
-        if (response != "OK") throw new InvalidOperationException("Android control agent did not respond.");
+        if (response != "OK") throw new InvalidOperationException("Android Input Agent did not respond.");
     }
 
     public Task<string> TapAsync(double x, double y, CancellationToken ct = default) => SendAsync($"TAP {x:0.####} {y:0.####}", ct);
