@@ -1,0 +1,29 @@
+{
+  "adb_path": "C:\\platform-tools\\adb.exe",
+  "device_serial": "RF8N20ZRDFF",
+  "scrcpy_path": "C:\\Users\\Atef\\Downloads\\scrcpy-win64-v3.3.4\\scrcpy-win64-v3.3.4\\scrcpy.exe",
+  "frame_hz": 20,
+  "frame_duration_ms": 60,
+  "joystick": {
+    "x": 0.1943359375,
+    "y": 0.6916395223,
+    "radius": 0.10
+  },
+  "mouse_look": {
+    "anchor_x": 0.63,
+    "anchor_y": 0.47,
+    "scale": 0.0025,
+    "max_delta": 45
+  },
+  "keys": {
+    "space": "jump",
+    "c": "crouch",
+    "z": "prone",
+    "r": "reload",
+    "1": "weapon1",
+    "2": "weapon2",
+    "m": "map",
+    "tab": "inventory",
+    "shift": "sprint"
+  }
+}
