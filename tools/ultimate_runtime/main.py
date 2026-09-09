@@ -28,13 +28,12 @@ class AgentConnection:
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
     def connect(self):
-        # Host is the TCP client; the device-side agent is the server.
         self._run_adb("-s", self.serial, "forward", "--remove", f"tcp:{self.PORT}")
         p = self._run_adb("-s", self.serial, "forward", f"tcp:{self.PORT}", f"tcp:{self.PORT}")
         if p.returncode:
             raise RuntimeError(p.stderr.strip() or "Could not create ADB forward tunnel")
         last_error = None
-        for _ in range(15):
+        for _ in range(20):
             try:
                 self.sock = socket.create_connection(("127.0.0.1", self.PORT), timeout=1)
                 self.sock.settimeout(2)
@@ -43,7 +42,7 @@ class AgentConnection:
                 last_error = "Agent PING returned ERR"
             except OSError as exc:
                 last_error = exc
-                time.sleep(0.2)
+                time.sleep(0.25)
         raise RuntimeError(f"Android Input Agent did not open/respond on port {self.PORT}: {last_error}")
 
     def command(self, line: str) -> str:
@@ -63,17 +62,20 @@ class AgentConnection:
         payload = json.dumps({"durationMs": duration_ms, "pointers": pointers}, separators=(",", ":"))
         return self.command("FRAME " + payload) == "OK"
 
+    def tap(self, x: float, y: float):
+        return self.command(f"TAP {x:.2f} {y:.2f}") == "OK"
+
+    def swipe(self, x1: float, y1: float, x2: float, y2: float, duration: int):
+        return self.command(f"SWIPE {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {duration}") == "OK"
+
     def reset(self):
-        try:
-            self.command("RESET")
-        except Exception:
-            pass
+        try: self.command("RESET")
+        except Exception: pass
 
     def close(self):
         self.reset()
         try:
-            if self.sock:
-                self.sock.close()
+            if self.sock: self.sock.close()
         finally:
             self.sock = None
         self._run_adb("-s", self.serial, "forward", "--remove", f"tcp:{self.PORT}")
@@ -92,6 +94,8 @@ class Mapper:
         self.buttons: set[str] = set()
         self.lock = threading.Lock()
         self.look_dx = self.look_dy = 0.0
+        self.look_nx = float(CFG["mouse_look"]["anchor_x"])
+        self.look_ny = float(CFG["mouse_look"]["anchor_y"])
         self.mouse_lock = threading.Lock()
         self.last_mouse = None
         self.cursor = mouse.Controller()
@@ -132,120 +136,110 @@ class Mapper:
         return self.to_px(v["x"], v["y"])
 
     def action_tap(self, name: str):
-        if name not in self.hud:
-            return
+        if name not in self.hud: return
         x, y = self.point(name)
-        self.adb.frame([{"id": 4, "x": round(x, 2), "y": round(y, 2), "pressure": 1.0}], 35)
-        self.adb.reset()
+        try: self.adb.tap(x, y)
+        except Exception as exc: print("Agent tap:", exc)
 
     def key_name(self, key):
         ch = getattr(key, "char", None)
-        if ch:
-            return ch.lower()
-        return {
-            keyboard.Key.space: "space", keyboard.Key.shift: "shift",
-            keyboard.Key.tab: "tab", keyboard.Key.f8: "f8",
-            keyboard.Key.esc: "escape"
-        }.get(key)
+        if ch: return ch.lower()
+        return {keyboard.Key.space:"space", keyboard.Key.shift:"shift", keyboard.Key.tab:"tab",
+                keyboard.Key.f8:"f8", keyboard.Key.esc:"escape"}.get(key)
 
     def key_down(self, key):
         name = self.key_name(key)
-        if name == "f8":
-            self.toggle_capture(); return
-        if name in {"w", "a", "s", "d"}:
+        if name == "f8": self.toggle_capture(); return
+        if name in {"w","a","s","d"}:
             with self.lock: self.held.add(name)
             return
         action = self.keys.get(name)
-        if action:
-            try: self.action_tap(action)
-            except Exception as exc: print("Agent:", exc)
-        elif name == "escape":
-            self.running = False
+        if action: self.action_tap(action)
+        elif name == "escape": self.running = False
 
     def key_up(self, key):
         name = self.key_name(key)
-        if name in {"w", "a", "s", "d"}:
+        if name in {"w","a","s","d"}:
             with self.lock: self.held.discard(name)
 
     def mouse_click(self, x, y, button, pressed):
-        if button not in {mouse.Button.left, mouse.Button.right}:
-            return
-        action = "fire" if button == mouse.Button.left else "ads"
+        if button == mouse.Button.left: action="fire"
+        elif button == mouse.Button.right: action="ads"
+        else: return
         with self.lock:
             if pressed: self.buttons.add(action)
             else: self.buttons.discard(action)
 
     def mouse_move(self, x, y):
-        if not self.mouse_capture:
-            return
+        if not self.mouse_capture: return
         with self.mouse_lock:
             if self.last_mouse is None:
-                self.last_mouse = (x, y)
-                return
-            self.look_dx += x - self.last_mouse[0]
-            self.look_dy += y - self.last_mouse[1]
-            self.last_mouse = (x, y)
+                self.last_mouse=(x,y); return
+            self.look_dx += x-self.last_mouse[0]
+            self.look_dy += y-self.last_mouse[1]
+            self.last_mouse=(x,y)
         if self.capture_pos is not None:
-            try: self.cursor.position = self.capture_pos
+            try: self.cursor.position=self.capture_pos
             except Exception: pass
 
     def toggle_capture(self):
         self.mouse_capture = not self.mouse_capture
+        with self.mouse_lock:
+            self.look_dx = self.look_dy = 0.0
+            self.last_mouse = None
+        self.look_nx = self.m["anchor_x"]
+        self.look_ny = self.m["anchor_y"]
         if self.mouse_capture:
-            self.capture_pos = self.cursor.position
-            self.last_mouse = self.capture_pos
+            self.capture_pos=self.cursor.position
+            self.last_mouse=self.capture_pos
             ctypes.windll.user32.ShowCursor(False)
             print("Mouse Look: ON (F8 to release)")
         else:
             ctypes.windll.user32.ShowCursor(True)
-            self.last_mouse = None
             print("Mouse Look: OFF")
 
     def build_pointers(self):
-        pointers = []
+        pointers=[]
         with self.lock:
-            keys = set(self.held)
-            buttons = set(self.buttons)
+            keys=set(self.held); buttons=set(self.buttons)
 
         if keys:
-            dx = int("d" in keys) - int("a" in keys)
-            dy = int("s" in keys) - int("w" in keys)
-            mag = (dx * dx + dy * dy) ** 0.5
-            if mag: dx, dy = dx / mag, dy / mag
-            nx = max(.01, min(.99, self.j["x"] + dx * self.j["radius"]))
-            ny = max(.01, min(.99, self.j["y"] + dy * self.j["radius"]))
-            x, y = self.to_px(nx, ny)
-            pointers.append({"id": 0, "x": round(x,2), "y": round(y,2), "pressure": 1.0})
+            dx=int("d" in keys)-int("a" in keys)
+            dy=int("s" in keys)-int("w" in keys)
+            mag=(dx*dx+dy*dy)**0.5
+            if mag: dx,dy=dx/mag,dy/mag
+            nx=max(.01,min(.99,self.j["x"]+dx*self.j["radius"]))
+            ny=max(.01,min(.99,self.j["y"]+dy*self.j["radius"]))
+            x,y=self.to_px(nx,ny)
+            pointers.append({"id":0,"x":round(x,2),"y":round(y,2),"pressure":1.0})
 
         if self.mouse_capture:
             with self.mouse_lock:
-                dx, dy = self.look_dx, self.look_dy
-                self.look_dx = self.look_dy = 0.0
-            dx = max(-self.m["max_delta"], min(self.m["max_delta"], dx))
-            dy = max(-self.m["max_delta"], min(self.m["max_delta"], dy))
-            # scale = touch pixels generated for one mouse pixel.
-            nx = self.m["anchor_x"] + (dx * self.m["scale"]) / max(self.width, 1)
-            ny = self.m["anchor_y"] + (dy * self.m["scale"]) / max(self.height, 1)
-            x, y = self.to_px(nx, ny)
-            pointers.append({"id": 1, "x": round(x,2), "y": round(y,2), "pressure": 1.0})
+                dx,dy=self.look_dx,self.look_dy
+                self.look_dx=self.look_dy=0.0
+            dx=max(-self.m["max_delta"],min(self.m["max_delta"],dx))
+            dy=max(-self.m["max_delta"],min(self.m["max_delta"],dy))
+            self.look_nx += (dx*self.m["scale"])/max(self.width,1)
+            self.look_ny += (dy*self.m["scale"])/max(self.height,1)
+            self.look_nx=max(.02,min(.98,self.look_nx))
+            self.look_ny=max(.02,min(.98,self.look_ny))
+            x,y=self.to_px(self.look_nx,self.look_ny)
+            pointers.append({"id":1,"x":round(x,2),"y":round(y,2),"pressure":1.0})
 
         for action in buttons:
             if action not in self.hud: continue
-            pid = 2 if action == "fire" else 3
-            x, y = self.point(action)
-            pointers.append({"id": pid, "x": round(x,2), "y": round(y,2), "pressure": 1.0})
+            pid=2 if action=="fire" else 3
+            x,y=self.point(action)
+            pointers.append({"id":pid,"x":round(x,2),"y":round(y,2),"pressure":1.0})
         return pointers
 
     def frame_loop(self):
-        hz = max(10, min(30, int(CFG.get("frame_hz", 20))))
+        hz=max(10,min(30,int(CFG.get("frame_hz",20))))
         while self.running:
-            try:
-                self.adb.frame(self.build_pointers(), int(CFG.get("frame_duration_ms", 50)))
+            try: self.adb.frame(self.build_pointers(),int(CFG.get("frame_duration_ms",50)))
             except Exception as exc:
-                print("Agent frame:", exc)
-                self.running = False
-                break
-            time.sleep(1.0 / hz)
+                print("Agent frame:",exc); self.running=False; break
+            time.sleep(1.0/hz)
 
     def run(self):
         print("PUBG-AutoMapper FINAL runtime")
@@ -254,17 +248,14 @@ class Mapper:
         print("F8 = Mouse Look capture/release | ESC = stop")
         print("Android Input Agent: connected")
         self.kb.start(); self.ms.start()
-        threading.Thread(target=self.frame_loop, daemon=True).start()
+        threading.Thread(target=self.frame_loop,daemon=True).start()
         try:
-            while self.running:
-                time.sleep(.2)
+            while self.running: time.sleep(.2)
         finally:
-            self.kb.stop(); self.ms.stop()
-            ctypes.windll.user32.ShowCursor(True)
-            self.adb.close()
+            self.kb.stop(); self.ms.stop(); ctypes.windll.user32.ShowCursor(True); self.adb.close()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     try: Mapper().run()
     except Exception as exc:
-        print("ERROR:", exc)
+        print("ERROR:",exc)
         input("Press Enter to exit...")
