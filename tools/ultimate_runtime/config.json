@@ -3,17 +3,23 @@
   "device_serial": "RF8N20ZRDFF",
   "scrcpy_path": "C:\\Users\\Atef\\Downloads\\scrcpy-win64-v3.3.4\\scrcpy-win64-v3.3.4\\scrcpy.exe",
   "frame_hz": 20,
-  "frame_duration_ms": 60,
+  "frame_duration_ms": 50,
+  "rotation": 1,
   "joystick": {
     "x": 0.1943359375,
     "y": 0.6916395223,
-    "radius": 0.10
+    "radius": 0.10,
+    "update_hz": 12,
+    "swipe_ms": 55
   },
   "mouse_look": {
     "anchor_x": 0.63,
     "anchor_y": 0.47,
-    "scale": 0.0025,
-    "max_delta": 45
+    "scale": 2.0,
+    "update_hz": 20,
+    "min_delta": 2.0,
+    "max_delta": 45,
+    "swipe_ms": 16
   },
   "keys": {
     "space": "jump",
