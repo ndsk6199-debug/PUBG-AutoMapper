@@ -2,7 +2,6 @@ package com.pubgautomapper.agent
 
 import android.net.LocalServerSocket
 import android.net.LocalSocket
-import android.net.LocalSocketAddress
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
@@ -17,7 +16,7 @@ class ControlSocketServer(private val service: ControlAccessibilityService) : Ru
 
     override fun run() {
         try {
-            server = LocalServerSocket(LocalSocketAddress("pubg_automapper"))
+            server = LocalServerSocket("pubg_automapper")
             while (running) {
                 val socket = server?.accept() ?: break
                 socket.use { handle(it) }
