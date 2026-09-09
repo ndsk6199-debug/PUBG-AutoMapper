@@ -11,8 +11,25 @@ public sealed class AdbService
 {
     public string FindAdb()
     {
-        var local = Path.Combine(AppContext.BaseDirectory, "tools", "adb", "adb.exe");
-        return File.Exists(local) ? local : "adb.exe";
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "tools", "adb", "adb.exe"),
+            @"C:\platform-tools\adb.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "platform-tools", "adb.exe")
+        };
+
+        var local = candidates.FirstOrDefault(File.Exists);
+        if (!string.IsNullOrWhiteSpace(local)) return local;
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var exe = Path.Combine(dir.Trim(), "adb.exe");
+            if (File.Exists(exe)) return exe;
+        }
+
+        throw new FileNotFoundException(
+            "adb.exe was not found. Checked bundled tools/adb, C:\\platform-tools, user platform-tools, and PATH.");
     }
 
     public async Task<IReadOnlyList<AdbDevice>> GetDevicesAsync(CancellationToken ct = default)
@@ -59,9 +76,10 @@ public sealed class AdbService
 
     private async Task<(int ExitCode, string StdOut, string StdErr)> RunAsync(string args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo(FindAdb(), args)
+        var adb = FindAdb();
+        var psi = new ProcessStartInfo(adb, args)
         { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, StandardOutputEncoding = Encoding.UTF8 };
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("adb.exe not found. Install Android Platform Tools or put adb.exe in tools/adb.");
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"Failed to start adb.exe at {adb}.");
         var output = await p.StandardOutput.ReadToEndAsync(ct);
         var error = await p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);
