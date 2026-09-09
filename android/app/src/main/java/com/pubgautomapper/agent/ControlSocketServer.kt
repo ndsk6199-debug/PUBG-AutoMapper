@@ -29,16 +29,17 @@ class ControlSocketServer(private val service: ControlAccessibilityService) : Ru
         val output = socket.outputStream.bufferedWriter()
         input.forEachLine { line ->
             val trimmed = line.trim()
-            val ok = when {
-                trimmed == "PING" -> true
-                trimmed == "RESET" -> service.resetGestures()
+            when {
+                trimmed == "PING" -> { output.write("OK\n"); output.flush() }
+                trimmed == "RESET" -> { service.resetGestures() }
                 trimmed.startsWith("TAP ") -> {
                     val p = trimmed.split(' ')
-                    p.size == 3 && service.tap(p[1].toFloatOrNull() ?: Float.NaN, p[2].toFloatOrNull() ?: Float.NaN)
+                    service.tap(p.getOrNull(1)?.toFloatOrNull() ?: Float.NaN,
+                        p.getOrNull(2)?.toFloatOrNull() ?: Float.NaN)
                 }
                 trimmed.startsWith("SWIPE ") -> {
                     val p = trimmed.split(' ')
-                    p.size == 6 && service.swipe(
+                    if (p.size == 6) service.swipe(
                         p[1].toFloatOrNull() ?: Float.NaN,
                         p[2].toFloatOrNull() ?: Float.NaN,
                         p[3].toFloatOrNull() ?: Float.NaN,
@@ -46,11 +47,11 @@ class ControlSocketServer(private val service: ControlAccessibilityService) : Ru
                         p[5].toLongOrNull() ?: 120L
                     )
                 }
-                trimmed.startsWith("FRAME ") -> service.applyFrame(trimmed.removePrefix("FRAME "))
-                else -> false
+                trimmed.startsWith("FRAME ") -> {
+                    // FRAME is intentionally fire-and-forget to keep the pointer stream low-latency.
+                    service.applyFrame(trimmed.removePrefix("FRAME "))
+                }
             }
-            output.write(if (ok) "OK\n" else "ERR\n")
-            output.flush()
         }
     }
 }
