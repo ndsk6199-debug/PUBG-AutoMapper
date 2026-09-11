@@ -50,9 +50,13 @@ public partial class MainWindow : Window
             StatusText.Text = $"Status: Connected • {device.Model} • {_serial}";
             ResolutionText.Text = $"Resolution: {_width} × {_height}";
             CoordinateText.Text = "Coordinate inspector: click the screen";
-            ResultsText.Text = "Screen captured. Press Analyze HUD.";
+            ResultsText.Text = "Screen captured. Press Analyze HUD or wait for Android Agent auto-connect.";
             DetectHudButton.IsEnabled = true;
             BridgeButton.IsEnabled = true;
+
+            // Do not make the user connect the bridge manually. Retry briefly because the
+            // launcher starts the Android agent immediately before the desktop app opens.
+            _ = Dispatcher.InvokeAsync(async () => await AutoConnectAgentAsync());
         }
         catch (Exception ex)
         {
@@ -63,6 +67,47 @@ public partial class MainWindow : Window
             BridgeButton.IsEnabled = false;
         }
         finally { RefreshButton.IsEnabled = true; }
+    }
+
+    private async Task AutoConnectAgentAsync()
+    {
+        if (_serial is null) return;
+        for (int attempt = 1; attempt <= 10; attempt++)
+        {
+            try
+            {
+                _bridge?.Dispose();
+                _bridge = new ControlBridge(_adb);
+                await _bridge.ConnectAsync(_serial);
+                _input?.Dispose();
+                _input = new RealtimeInputController(_bridge)
+                {
+                    ScreenWidth = _width,
+                    ScreenHeight = _height
+                };
+                _input.Attach(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+                _input.Start();
+                BridgeButton.IsEnabled = true;
+                TestTapButton.IsEnabled = true;
+                InputToggleButton.IsEnabled = true;
+                InputToggleButton.Content = "Stop Keyboard + Mouse";
+                StatusText.Text = "Status: Android Agent connected • Keyboard + mouse ACTIVE";
+                ResultsText.Text = "Agent bridge connected automatically. Keyboard + mouse input is ACTIVE.";
+                return;
+            }
+            catch (Exception ex)
+            {
+                _bridge?.Dispose();
+                _bridge = null;
+                _input?.Dispose();
+                _input = null;
+                StatusText.Text = $"Status: Waiting for Android Agent ({attempt}/10)";
+                ResultsText.Text = ex.Message;
+                await Task.Delay(500);
+            }
+        }
+        BridgeButton.IsEnabled = true;
+        StatusText.Text = "Status: Android Agent not reachable. Click Connect Android Agent to retry.";
     }
 
     private void DetectHud_Click(object sender, RoutedEventArgs e)
