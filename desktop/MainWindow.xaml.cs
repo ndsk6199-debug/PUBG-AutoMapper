@@ -25,6 +25,9 @@ public partial class MainWindow : Window
     {
         RefreshButton.IsEnabled = false;
         GenerateButton.IsEnabled = false;
+        BridgeButton.IsEnabled = false;
+        TestTapButton.IsEnabled = false;
+        InputToggleButton.IsEnabled = false;
         Overlay.Children.Clear();
         try
         {
@@ -49,6 +52,7 @@ public partial class MainWindow : Window
             CoordinateText.Text = "Coordinate inspector: click the screen";
             ResultsText.Text = "Screen captured. Press Analyze HUD.";
             DetectHudButton.IsEnabled = true;
+            BridgeButton.IsEnabled = true;
         }
         catch (Exception ex)
         {
@@ -56,6 +60,7 @@ public partial class MainWindow : Window
             ResolutionText.Text = "Resolution: —";
             CoordinateText.Text = ex.Message;
             DetectHudButton.IsEnabled = false;
+            BridgeButton.IsEnabled = false;
         }
         finally { RefreshButton.IsEnabled = true; }
     }
@@ -71,6 +76,7 @@ public partial class MainWindow : Window
                 : string.Join(Environment.NewLine, _lastPoints.Select(p => $"{p.Name}: ({p.X:0.000000}, {p.Y:0.000000})  confidence={p.Confidence:0.00}"));
             StatusText.Text = $"Status: HUD analysis complete • {_lastPoints.Count} candidate(s)";
             GenerateButton.IsEnabled = _lastPoints.Count > 0;
+            BridgeButton.IsEnabled = _serial is not null;
             DrawOverlay();
         }
         catch (Exception ex) { ResultsText.Text = "HUD error: " + ex.Message; }
